@@ -8,7 +8,13 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Copy, Target, TrendingUp, Users } from "lucide-react";
 import AnimatedLineChart from "@/components/AnimatedLineChart";
 
@@ -25,12 +31,51 @@ const Dashboard = () => {
   const { toast } = useToast();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  const { refreshKey } = usePitchSaleRefresh();
+  const { refreshKey, triggerRefresh } = usePitchSaleRefresh();
+  // Supabase realtime subscription for pitches and sales
+  useEffect(() => {
+    // Only subscribe if logged in and has company
+    if (!userProfile?.company_id) return;
+    // Listen for inserts/updates/deletes on pitches and sales
+    const pitchSub = supabase
+      .channel("realtime-pitches")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pitches" },
+        (payload) => {
+          triggerRefresh();
+        }
+      )
+      .subscribe();
+    const salesSub = supabase
+      .channel("realtime-sales")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "sales" },
+        (payload) => {
+          triggerRefresh();
+        }
+      )
+      .subscribe();
+    // Cleanup
+    return () => {
+      supabase.removeChannel(pitchSub);
+      supabase.removeChannel(salesSub);
+    };
+  }, [userProfile?.company_id, triggerRefresh]);
 
   const [copied, setCopied] = useState(false);
-  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string } | null>(null);
-  const [stats, setStats] = useState({ totalPitches: 0, totalSales: 0, hitRate: 0 });
-  const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">("monthly");
+  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string } | null>(
+    null
+  );
+  const [stats, setStats] = useState({
+    totalPitches: 0,
+    totalSales: 0,
+    hitRate: 0,
+  });
+  const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(
+    "monthly"
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [teamChart, setTeamChart] = useState<{
     pitches: number[];
@@ -40,7 +85,9 @@ const Dashboard = () => {
   }>({ pitches: [], sales: [], hitRate: [], labels: [] });
   const [sellerName, setSellerName] = useState("");
   const [sellerEmail, setSellerEmail] = useState("");
-  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(
+    null
+  );
   const [creatingSeller, setCreatingSeller] = useState(false);
 
   // Hent org info (company navn og id) baseret på userProfile.company_id
@@ -65,14 +112,14 @@ const Dashboard = () => {
   }, [userProfile?.company_id]);
   // Helper: generate a strong random password
   function generatePassword(length = 12) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=';
-    let pwd = '';
+    const chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=";
+    let pwd = "";
     for (let i = 0; i < length; i++) {
       pwd += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return pwd;
   }
-
 
   // Handler: create seller
   const handleCreateSeller = async (e: React.FormEvent) => {
@@ -96,25 +143,54 @@ const Dashboard = () => {
         setGeneratedPassword(password); // Vis password selv ved fejl
         // Tjek om error har status property (kan være SupabaseAuthError)
         // @ts-ignore
-        if (typeof error === "object" && error !== null && "status" in error && error.status === 429) {
-          toast({ title: "For mange forsøg", description: "Vent et øjeblik og prøv igen.", variant: "destructive" });
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "status" in error &&
+          error.status === 429
+        ) {
+          toast({
+            title: "For mange forsøg",
+            description: "Vent et øjeblik og prøv igen.",
+            variant: "destructive",
+          });
         } else if (error.message?.includes("already registered")) {
-          toast({ title: "Email findes allerede", description: "Denne email er allerede i brug.", variant: "destructive" });
+          toast({
+            title: "Email findes allerede",
+            description: "Denne email er allerede i brug.",
+            variant: "destructive",
+          });
         } else {
-          toast({ title: "Fejl ved oprettelse af seller", description: error.message, variant: "destructive" });
+          toast({
+            title: "Fejl ved oprettelse af seller",
+            description: error.message,
+            variant: "destructive",
+          });
         }
       } else if (!data?.user) {
         setGeneratedPassword(password);
-        toast({ title: "Ukendt fejl", description: "Sælgeren blev ikke oprettet. Prøv igen.", variant: "destructive" });
+        toast({
+          title: "Ukendt fejl",
+          description: "Sælgeren blev ikke oprettet. Prøv igen.",
+          variant: "destructive",
+        });
       } else {
         setGeneratedPassword(password);
-        toast({ title: "Seller oprettet!", description: `En bekræftelsesmail er sendt til ${sellerEmail}.`, variant: "default" });
+        toast({
+          title: "Seller oprettet!",
+          description: `En bekræftelsesmail er sendt til ${sellerEmail}.`,
+          variant: "default",
+        });
         setSellerName("");
         setSellerEmail("");
       }
     } catch (err: any) {
       setGeneratedPassword(password); // Vis password selv ved fejl
-      toast({ title: "Uventet fejl", description: err?.message || String(err), variant: "destructive" });
+      toast({
+        title: "Uventet fejl",
+        description: err?.message || String(err),
+        variant: "destructive",
+      });
     } finally {
       setCreatingSeller(false);
     }
@@ -131,7 +207,11 @@ const Dashboard = () => {
         .eq("company_id", userProfile.company_id);
 
       if (usersError) {
-        toast({ title: "Fejl ved hentning af brugere", description: usersError.message, variant: "destructive" });
+        toast({
+          title: "Fejl ved hentning af brugere",
+          description: usersError.message,
+          variant: "destructive",
+        });
         setLoadingData(false);
         return;
       }
@@ -162,8 +242,12 @@ const Dashboard = () => {
             // ISO week: yyyy-Www
             const year = date.getUTCFullYear();
             const firstDayOfYear = new Date(Date.UTC(year, 0, 1));
-            const pastDaysOfYear = Math.floor((date.getTime() - firstDayOfYear.getTime()) / 86400000);
-            const week = Math.ceil((pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7);
+            const pastDaysOfYear = Math.floor(
+              (date.getTime() - firstDayOfYear.getTime()) / 86400000
+            );
+            const week = Math.ceil(
+              (pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7
+            );
             key = `${year}-W${week.toString().padStart(2, "0")}`;
           } else if (period === "monthly") {
             key = date.toISOString().slice(0, 7); // yyyy-MM
@@ -177,7 +261,9 @@ const Dashboard = () => {
       const pitchesMap = groupByPeriod(pitches || [], period);
       const salesMap = groupByPeriod(sales || [], period);
       // Get all unique periods
-      const allPeriods = Array.from(new Set([...pitchesMap.keys(), ...salesMap.keys()])).sort();
+      const allPeriods = Array.from(
+        new Set([...pitchesMap.keys(), ...salesMap.keys()])
+      ).sort();
 
       // Build cumulative arrays
       let cumulativePitches = 0;
@@ -185,12 +271,16 @@ const Dashboard = () => {
       const pitchesArr: number[] = [];
       const salesArr: number[] = [];
       const hitRateArr: number[] = [];
-      allPeriods.forEach(periodKey => {
+      allPeriods.forEach((periodKey) => {
         cumulativePitches += pitchesMap.get(periodKey) || 0;
         cumulativeSales += salesMap.get(periodKey) || 0;
         pitchesArr.push(cumulativePitches);
         salesArr.push(cumulativeSales);
-        hitRateArr.push(cumulativePitches > 0 ? Math.round((cumulativeSales / cumulativePitches) * 100) : 0);
+        hitRateArr.push(
+          cumulativePitches > 0
+            ? Math.round((cumulativeSales / cumulativePitches) * 100)
+            : 0
+        );
       });
 
       setTeamChart({
@@ -202,15 +292,31 @@ const Dashboard = () => {
 
       // Leaderboard and stats as before
       const leaderboardData: LeaderboardEntry[] = users.map((user) => {
-        const userPitches = pitches?.filter((p) => p.user_id === user.id).length || 0;
-        const userSales = sales?.filter((s) => s.user_id === user.id).length || 0;
-        const hitRate = userPitches > 0 ? Math.round((userSales / userPitches) * 100) : 0;
-        return { id: user.id, name: user.name, pitches: userPitches, sales: userSales, hitRate };
+        const userPitches =
+          pitches?.filter((p) => p.user_id === user.id).length || 0;
+        const userSales =
+          sales?.filter((s) => s.user_id === user.id).length || 0;
+        const hitRate =
+          userPitches > 0 ? Math.round((userSales / userPitches) * 100) : 0;
+        return {
+          id: user.id,
+          name: user.name,
+          pitches: userPitches,
+          sales: userSales,
+          hitRate,
+        };
       });
       setLeaderboard(leaderboardData);
-      const totalPitches = leaderboardData.reduce((sum, entry) => sum + entry.pitches, 0);
-      const totalSales = leaderboardData.reduce((sum, entry) => sum + entry.sales, 0);
-      const hitRate = totalPitches > 0 ? Math.round((totalSales / totalPitches) * 100) : 0;
+      const totalPitches = leaderboardData.reduce(
+        (sum, entry) => sum + entry.pitches,
+        0
+      );
+      const totalSales = leaderboardData.reduce(
+        (sum, entry) => sum + entry.sales,
+        0
+      );
+      const hitRate =
+        totalPitches > 0 ? Math.round((totalSales / totalPitches) * 100) : 0;
       setStats({ totalPitches, totalSales, hitRate });
 
       setLoadingData(false);
@@ -224,7 +330,11 @@ const Dashboard = () => {
   );
 
   if (loading || loadingData) {
-    return <div className="flex items-center justify-center h-screen"><p>Loader data...</p></div>;
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <p>Loader data...</p>
+      </div>
+    );
   }
 
   return (
@@ -250,13 +360,18 @@ const Dashboard = () => {
                 >
                   <Copy className="inline h-4 w-4" />
                 </button>
-                {copied && <span className="text-green-600 ml-1">Copied!</span>})
+                {copied && <span className="text-green-600 ml-1">Copied!</span>}
+                )
               </div>
             )}
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{userProfile?.name} (Team Leader)</span>
-            <Button variant="outline" onClick={signOut}>Sign Out</Button>
+            <span className="text-sm text-muted-foreground">
+              {userProfile?.name} (Team Leader)
+            </span>
+            <Button variant="outline" onClick={signOut}>
+              Sign Out
+            </Button>
           </div>
         </div>
       </header>
@@ -268,31 +383,62 @@ const Dashboard = () => {
             <CardTitle>Opret ny seller</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="flex flex-col md:flex-row gap-4 items-end" onSubmit={handleCreateSeller}>
+            <form
+              className="flex flex-col md:flex-row gap-4 items-end"
+              onSubmit={handleCreateSeller}
+            >
               <div className="flex-1">
                 <Label htmlFor="sellerName">Navn</Label>
-                <Input id="sellerName" value={sellerName} onChange={e => setSellerName(e.target.value)} required disabled={creatingSeller} />
+                <Input
+                  id="sellerName"
+                  value={sellerName}
+                  onChange={(e) => setSellerName(e.target.value)}
+                  required
+                  disabled={creatingSeller}
+                />
               </div>
               <div className="flex-1">
                 <Label htmlFor="sellerEmail">Email</Label>
-                <Input id="sellerEmail" type="email" value={sellerEmail} onChange={e => setSellerEmail(e.target.value)} required disabled={creatingSeller} />
+                <Input
+                  id="sellerEmail"
+                  type="email"
+                  value={sellerEmail}
+                  onChange={(e) => setSellerEmail(e.target.value)}
+                  required
+                  disabled={creatingSeller}
+                />
               </div>
-              <Button type="submit" disabled={creatingSeller || !sellerName || !sellerEmail} className="h-10">Opret seller</Button>
+              <Button
+                type="submit"
+                disabled={creatingSeller || !sellerName || !sellerEmail}
+                className="h-10"
+              >
+                Opret seller
+              </Button>
             </form>
             {generatedPassword && (
               <div className="mt-4 p-3 bg-muted rounded">
-                <div className="font-semibold mb-1">Adgangskode til seller:</div>
-                <div className="font-mono select-all text-lg">{generatedPassword}</div>
-                <div className="text-xs text-muted-foreground mt-1">Giv denne adgangskode til sælgeren. De skal bekræfte deres email før login.</div>
+                <div className="font-semibold mb-1">
+                  Adgangskode til seller:
+                </div>
+                <div className="font-mono select-all text-lg">
+                  {generatedPassword}
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Giv denne adgangskode til sælgeren. De skal bekræfte deres
+                  email før login.
+                </div>
               </div>
             )}
           </CardContent>
         </Card>
-  {/* Stats Cards */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Pitches</CardTitle>
+              <CardTitle className="text-sm font-medium">
+                Total Pitches
+              </CardTitle>
               <Target className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
@@ -322,11 +468,13 @@ const Dashboard = () => {
         {/* Team performance graf: X = pitches, Y = sales, Hit Rate % */}
         <div className="my-8">
           <div className="mb-4 flex items-center gap-2">
-            <label htmlFor="period-select" className="font-medium">Periode:</label>
+            <label htmlFor="period-select" className="font-medium">
+              Periode:
+            </label>
             <select
               id="period-select"
               value={period}
-              onChange={e => setPeriod(e.target.value as any)}
+              onChange={(e) => setPeriod(e.target.value as any)}
               className="border rounded px-2 py-1"
             >
               <option value="daily">Dag</option>
@@ -372,18 +520,25 @@ const Dashboard = () => {
               <Input
                 placeholder="Søg på navn..."
                 value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="max-w-xs"
               />
             </div>
             <div className="space-y-2">
               {filteredLeaderboard.length === 0 ? (
-                <div className="text-muted-foreground text-center py-4">Ingen brugere matcher søgningen.</div>
+                <div className="text-muted-foreground text-center py-4">
+                  Ingen brugere matcher søgningen.
+                </div>
               ) : (
                 filteredLeaderboard.map((entry, index) => (
-                  <div key={entry.id} className="flex items-center justify-between p-3 rounded-lg border">
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between p-3 rounded-lg border"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-muted">{index + 1}</div>
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-muted">
+                        {index + 1}
+                      </div>
                       <span className="font-medium">{entry.name}</span>
                     </div>
                     <div className="flex items-center gap-4 text-sm">
