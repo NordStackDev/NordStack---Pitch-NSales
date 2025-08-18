@@ -32,42 +32,8 @@ const Dashboard = () => {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const { refreshKey, triggerRefresh } = usePitchSaleRefresh();
-  // Supabase realtime subscription for pitches and sales
-  useEffect(() => {
-    // Only subscribe if logged in and has company
-    if (!userProfile?.company_id) return;
-    // Listen for inserts/updates/deletes on pitches and sales
-    const pitchSub = supabase
-      .channel("realtime-pitches")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "pitches" },
-        (payload) => {
-          triggerRefresh();
-        }
-      )
-      .subscribe();
-    const salesSub = supabase
-      .channel("realtime-sales")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "sales" },
-        (payload) => {
-          triggerRefresh();
-        }
-      )
-      .subscribe();
-    // Cleanup
-    return () => {
-      supabase.removeChannel(pitchSub);
-      supabase.removeChannel(salesSub);
-    };
-  }, [userProfile?.company_id, triggerRefresh]);
-
-  const [copied, setCopied] = useState(false);
-  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string } | null>(
-    null
-  );
+  // Lokal opdatering: Ingen realtime subscription, kun opdatering via triggerRefresh
+  // State hooks (skal deklareres før fetchLeaderboard for at være i scope)
   const [stats, setStats] = useState({
     totalPitches: 0,
     totalSales: 0,
@@ -89,6 +55,138 @@ const Dashboard = () => {
     null
   );
   const [creatingSeller, setCreatingSeller] = useState(false);
+
+  const fetchLeaderboard = async () => {
+    if (!userProfile?.company_id) return;
+    setLoadingData(true);
+
+    const { data: users, error: usersError } = await supabase
+      .from("users")
+      .select("id, name")
+      .eq("company_id", userProfile.company_id);
+
+    if (usersError) {
+      toast({
+        title: "Fejl ved hentning af brugere",
+        description: usersError.message,
+        variant: "destructive",
+      });
+      setLoadingData(false);
+      return;
+    }
+
+    const userIds = users.map((u) => u.id);
+
+    // Fetch all pitches and sales for the team, sorted by date
+    const { data: pitches } = await supabase
+      .from("pitches")
+      .select("id, user_id, created_at")
+      .in("user_id", userIds)
+      .order("created_at", { ascending: true });
+    const { data: sales } = await supabase
+      .from("sales")
+      .select("id, user_id, created_at")
+      .in("user_id", userIds)
+      .order("created_at", { ascending: true });
+
+    // Helper to group by period
+    function groupByPeriod(items, period) {
+      const map = new Map();
+      for (const item of items) {
+        const date = new Date(item.created_at);
+        let key = "";
+        if (period === "daily") {
+          key = date.toISOString().slice(0, 10);
+        } else if (period === "weekly") {
+          // ISO week: yyyy-Www
+          const year = date.getUTCFullYear();
+          const firstDayOfYear = new Date(Date.UTC(year, 0, 1));
+          const pastDaysOfYear = Math.floor(
+            (date.getTime() - firstDayOfYear.getTime()) / 86400000
+          );
+          const week = Math.ceil(
+            (pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7
+          );
+          key = `${year}-W${week.toString().padStart(2, "0")}`;
+        } else if (period === "monthly") {
+          key = date.toISOString().slice(0, 7); // yyyy-MM
+        }
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+      return map;
+    }
+
+    // Group pitches and sales by selected period
+    const pitchesMap = groupByPeriod(pitches || [], period);
+    const salesMap = groupByPeriod(sales || [], period);
+    // Get all unique periods
+    const allPeriods = Array.from(
+      new Set([...pitchesMap.keys(), ...salesMap.keys()])
+    ).sort();
+
+    // Build cumulative arrays
+    let cumulativePitches = 0;
+    let cumulativeSales = 0;
+    const pitchesArr: number[] = [];
+    const salesArr: number[] = [];
+    const hitRateArr: number[] = [];
+    allPeriods.forEach((periodKey) => {
+      cumulativePitches += pitchesMap.get(periodKey) || 0;
+      cumulativeSales += salesMap.get(periodKey) || 0;
+      pitchesArr.push(cumulativePitches);
+      salesArr.push(cumulativeSales);
+      hitRateArr.push(
+        cumulativePitches > 0
+          ? Math.round((cumulativeSales / cumulativePitches) * 100)
+          : 0
+      );
+    });
+
+    setTeamChart({
+      pitches: pitchesArr,
+      sales: salesArr,
+      hitRate: hitRateArr,
+      labels: allPeriods,
+    });
+
+    // Leaderboard and stats as before
+    const leaderboardData: LeaderboardEntry[] = users.map((user) => {
+      const userPitches =
+        pitches?.filter((p) => p.user_id === user.id).length || 0;
+      const userSales = sales?.filter((s) => s.user_id === user.id).length || 0;
+      const hitRate =
+        userPitches > 0 ? Math.round((userSales / userPitches) * 100) : 0;
+      return {
+        id: user.id,
+        name: user.name,
+        pitches: userPitches,
+        sales: userSales,
+        hitRate,
+      };
+    });
+    setLeaderboard(leaderboardData);
+    const totalPitches = leaderboardData.reduce(
+      (sum, entry) => sum + entry.pitches,
+      0
+    );
+    const totalSales = leaderboardData.reduce(
+      (sum, entry) => sum + entry.sales,
+      0
+    );
+    const hitRate =
+      totalPitches > 0 ? Math.round((totalSales / totalPitches) * 100) : 0;
+    setStats({ totalPitches, totalSales, hitRate });
+
+    setLoadingData(false);
+  };
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [userProfile, refreshKey, period]);
+
+  const [copied, setCopied] = useState(false);
+  const [orgInfo, setOrgInfo] = useState<{ id: string; name: string } | null>(
+    null
+  );
 
   // Hent org info (company navn og id) baseret på userProfile.company_id
   useEffect(() => {
@@ -124,7 +222,7 @@ const Dashboard = () => {
   // Handler: create seller
   const handleCreateSeller = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sellerName || !sellerEmail || !userProfile?.company_id) {
+    if (!sellerName || !sellerEmail) {
       toast({ title: "Udfyld både navn og email", variant: "destructive" });
       return;
     }
@@ -132,12 +230,26 @@ const Dashboard = () => {
     setGeneratedPassword(null);
     const password = generatePassword();
     try {
+      // Find StormGroup company_id
+      const { data: companies, error: companyError } = await supabase
+        .from("companies")
+        .select("id")
+        .eq("name", "StormGroup");
+      if (companyError || !companies || companies.length === 0) {
+        toast({
+          title: "Kunne ikke finde StormGroup company_id",
+          variant: "destructive",
+        });
+        setCreatingSeller(false);
+        return;
+      }
+      const stormGroupCompanyId = companies[0].id;
       const { createSellerAsTeamlead } = await import("@/hooks/useAuth");
       const { data, error } = await createSellerAsTeamlead({
         email: sellerEmail,
         password,
         name: sellerName,
-        company_id: userProfile.company_id,
+        company_id: stormGroupCompanyId,
       });
       if (error) {
         setGeneratedPassword(password); // Vis password selv ved fejl
@@ -178,7 +290,7 @@ const Dashboard = () => {
         setGeneratedPassword(password);
         toast({
           title: "Seller oprettet!",
-          description: `En bekræftelsesmail er sendt til ${sellerEmail}.`,
+          description: "En bekræftelsesmail er sendt til ${sellerEmail}.",
           variant: "default",
         });
         setSellerName("");
@@ -196,133 +308,11 @@ const Dashboard = () => {
     }
   };
 
-  useEffect(() => {
-    const fetchLeaderboard = async () => {
-      if (!userProfile?.company_id) return;
-      setLoadingData(true);
-
-      const { data: users, error: usersError } = await supabase
-        .from("users")
-        .select("id, name")
-        .eq("company_id", userProfile.company_id);
-
-      if (usersError) {
-        toast({
-          title: "Fejl ved hentning af brugere",
-          description: usersError.message,
-          variant: "destructive",
-        });
-        setLoadingData(false);
-        return;
-      }
-
-      const userIds = users.map((u) => u.id);
-
-      // Fetch all pitches and sales for the team, sorted by date
-      const { data: pitches } = await supabase
-        .from("pitches")
-        .select("id, user_id, created_at")
-        .in("user_id", userIds)
-        .order("created_at", { ascending: true });
-      const { data: sales } = await supabase
-        .from("sales")
-        .select("id, user_id, created_at")
-        .in("user_id", userIds)
-        .order("created_at", { ascending: true });
-
-      // Helper to group by period
-      function groupByPeriod(items, period) {
-        const map = new Map();
-        for (const item of items) {
-          const date = new Date(item.created_at);
-          let key = "";
-          if (period === "daily") {
-            key = date.toISOString().slice(0, 10);
-          } else if (period === "weekly") {
-            // ISO week: yyyy-Www
-            const year = date.getUTCFullYear();
-            const firstDayOfYear = new Date(Date.UTC(year, 0, 1));
-            const pastDaysOfYear = Math.floor(
-              (date.getTime() - firstDayOfYear.getTime()) / 86400000
-            );
-            const week = Math.ceil(
-              (pastDaysOfYear + firstDayOfYear.getUTCDay() + 1) / 7
-            );
-            key = `${year}-W${week.toString().padStart(2, "0")}`;
-          } else if (period === "monthly") {
-            key = date.toISOString().slice(0, 7); // yyyy-MM
-          }
-          map.set(key, (map.get(key) || 0) + 1);
-        }
-        return map;
-      }
-
-      // Group pitches and sales by selected period
-      const pitchesMap = groupByPeriod(pitches || [], period);
-      const salesMap = groupByPeriod(sales || [], period);
-      // Get all unique periods
-      const allPeriods = Array.from(
-        new Set([...pitchesMap.keys(), ...salesMap.keys()])
-      ).sort();
-
-      // Build cumulative arrays
-      let cumulativePitches = 0;
-      let cumulativeSales = 0;
-      const pitchesArr: number[] = [];
-      const salesArr: number[] = [];
-      const hitRateArr: number[] = [];
-      allPeriods.forEach((periodKey) => {
-        cumulativePitches += pitchesMap.get(periodKey) || 0;
-        cumulativeSales += salesMap.get(periodKey) || 0;
-        pitchesArr.push(cumulativePitches);
-        salesArr.push(cumulativeSales);
-        hitRateArr.push(
-          cumulativePitches > 0
-            ? Math.round((cumulativeSales / cumulativePitches) * 100)
-            : 0
-        );
-      });
-
-      setTeamChart({
-        pitches: pitchesArr,
-        sales: salesArr,
-        hitRate: hitRateArr,
-        labels: allPeriods,
-      });
-
-      // Leaderboard and stats as before
-      const leaderboardData: LeaderboardEntry[] = users.map((user) => {
-        const userPitches =
-          pitches?.filter((p) => p.user_id === user.id).length || 0;
-        const userSales =
-          sales?.filter((s) => s.user_id === user.id).length || 0;
-        const hitRate =
-          userPitches > 0 ? Math.round((userSales / userPitches) * 100) : 0;
-        return {
-          id: user.id,
-          name: user.name,
-          pitches: userPitches,
-          sales: userSales,
-          hitRate,
-        };
-      });
-      setLeaderboard(leaderboardData);
-      const totalPitches = leaderboardData.reduce(
-        (sum, entry) => sum + entry.pitches,
-        0
-      );
-      const totalSales = leaderboardData.reduce(
-        (sum, entry) => sum + entry.sales,
-        0
-      );
-      const hitRate =
-        totalPitches > 0 ? Math.round((totalSales / totalPitches) * 100) : 0;
-      setStats({ totalPitches, totalSales, hitRate });
-
-      setLoadingData(false);
-    };
-    fetchLeaderboard();
-  }, [userProfile, refreshKey, period]);
+  // Efter logning af pitch/sale: triggerRefresh + fetchLeaderboard for at sikre UI opdateres straks
+  const handleLogPitchOrSale = async () => {
+    triggerRefresh();
+    await fetchLeaderboard();
+  };
 
   // Filtered leaderboard for search
   const filteredLeaderboard = leaderboard.filter((entry) =>
