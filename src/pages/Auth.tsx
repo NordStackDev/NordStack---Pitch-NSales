@@ -47,8 +47,13 @@ const Auth = () => {
           setTimeout(() => navigate("/"), 100);
         }
       } else {
-        // Signup flow: team_lead (StormGroup logik håndteres i useAuth)
-        const { error: signUpError } = await signUp(email, password, name, 'team_lead');
+        // Signup flow: team_lead (amsalesCompanyId logik håndteres i useAuth)
+        const { error: signUpError } = await signUp(
+          email,
+          password,
+          name,
+          "team_lead"
+        );
         if (signUpError) {
           toast({
             title: "Signup failed",
@@ -58,9 +63,11 @@ const Auth = () => {
         } else {
           setPendingConfirmation(true);
           toast({
-            title: "Account created",
-            description:
-              "Check din email og bekræft din konto før du logger ind.",
+            title: "Tjek din mail for at bekræfte din konto",
+            description: "Du skal bekræfte din email før du kan logge ind.",
+            duration: 4000,
+            className:
+              "bg-blue-500 text-white font-semibold text-base shadow-lg border border-blue-600",
           });
         }
       }

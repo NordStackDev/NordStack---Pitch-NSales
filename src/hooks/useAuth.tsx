@@ -1,26 +1,44 @@
 // Utility: Teamlead creates a seller without logging out
-export async function createSellerAsTeamlead({ email, password, name, company_id }: { email: string; password: string; name: string; company_id: string }) {
-  const { createClient } = await import('@supabase/supabase-js');
+export async function createSellerAsTeamlead({
+  email,
+  password,
+  name,
+  company_id,
+}: {
+  email: string;
+  password: string;
+  name: string;
+  company_id: string;
+}) {
+  const { createClient } = await import("@supabase/supabase-js");
   const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
   const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
   const tempClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   // Sikrer at company_id er en streng og ikke tom/null
   const companyIdStr = String(company_id);
-  if (!companyIdStr || companyIdStr === "null" || companyIdStr === "undefined") {
+  if (
+    !companyIdStr ||
+    companyIdStr === "null" ||
+    companyIdStr === "undefined"
+  ) {
     const error = new Error("company_id er ikke sat. Seller oprettes ikke.");
     console.error(error.message);
     return { data: null, error };
   }
 
-  console.log("Starting createSellerAsTeamlead", { email, name, company_id: companyIdStr });
+  console.log("Starting createSellerAsTeamlead", {
+    email,
+    name,
+    company_id: companyIdStr,
+  });
 
   const { data, error } = await tempClient.auth.signUp({
     email,
     password,
     options: {
-      data: { name, role: 'seller', company_id: companyIdStr },
-      emailRedirectTo: window.location.origin + '/auth',
+      data: { name, role: "seller", company_id: companyIdStr },
+      emailRedirectTo: window.location.origin + "/auth",
     },
   });
 
@@ -87,17 +105,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) throw error;
 
       if (!data) {
-        // Hent StormGroup company_id (forventes at være oprettet én gang i companies-tabellen)
+        // Hent AMSales company_id (forventes at være oprettet én gang i companies-tabellen)
         const { data: companies, error: companyError } = await supabase
           .from("companies")
           .select("id")
-          .eq("name", "StormGroup");
+          .eq("name", "AMSales");
         if (companyError || !companies || companies.length === 0) {
           setUserProfile(null);
-          setError("Kunne ikke finde StormGroup company_id");
+          setError("Kunne ikke finde AMSales company_id");
           return;
         }
-        const stormGroupCompanyId = companies[0].id;
+        const amsalesCompanyId = companies[0].id;
         // Create user profile if not exists
         const { data: newUser, error: upsertError } = await supabase
           .from("users")
@@ -107,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               email: authUser.email?.toLowerCase() || "",
               name: authUser.email?.split("@")[0] || "Demo User",
               role: "team_lead",
-              company_id: stormGroupCompanyId,
+              company_id: amsalesCompanyId,
             },
             { onConflict: "id" }
           )
@@ -167,7 +185,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     initSession();
     // Listen for auth state changes (login/logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         setUser(session.user);
         fetchUserProfile(session.user);
@@ -183,10 +203,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Sign in user and fetch profile
-  const signIn = async (email: string, password: string): Promise<{ error: Error | null }> => {
+  const signIn = async (
+    email: string,
+    password: string
+  ): Promise<{ error: Error | null }> => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       if (error) {
         setError(error.message);
         return { error };

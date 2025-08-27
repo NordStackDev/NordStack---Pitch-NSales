@@ -223,26 +223,26 @@ const Dashboard = () => {
     setGeneratedPassword(null);
     const password = generatePassword();
     try {
-      // Find StormGroup company_id
+      // Find amsalesCompanyId company_id
       const { data: companies, error: companyError } = await supabase
         .from("companies")
         .select("id")
-        .eq("name", "StormGroup");
+        .eq("name", "AMSales");
       if (companyError || !companies || companies.length === 0) {
         toast({
-          title: "Kunne ikke finde StormGroup company_id",
+          title: "Kunne ikke finde AMSales company_id",
           variant: "destructive",
         });
         setCreatingSeller(false);
         return;
       }
-      const stormGroupCompanyId = companies[0].id;
+      const amsalesCompanyId = companies[0].id;
       const { createSellerAsTeamlead } = await import("@/hooks/useAuth");
       const { data, error } = await createSellerAsTeamlead({
         email: sellerEmail,
         password,
         name: sellerName,
-        company_id: stormGroupCompanyId,
+        company_id: amsalesCompanyId,
       });
       if (error) {
         setGeneratedPassword(password); // Vis password selv ved fejl
