@@ -20,15 +20,19 @@ const Auth = () => {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const { signIn, signUp, error } = useAuth();
+  const { signIn, signUp, error: authError } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  const error = localError || authError;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loading) return;
     setLoading(true);
+    setLocalError(null);
 
     try {
       if (isLogin) {
@@ -37,6 +41,7 @@ const Auth = () => {
           if (error.message?.includes("Email not confirmed")) {
             setPendingConfirmation(true);
           }
+          setLocalError(error.message);
           toast({
             title: "Login failed",
             description: error.message,
@@ -47,7 +52,6 @@ const Auth = () => {
           setTimeout(() => navigate("/"), 100);
         }
       } else {
-        // Signup flow: team_lead (amsalesCompanyId logik håndteres i useAuth)
         const { error: signUpError } = await signUp(
           email,
           password,
@@ -55,6 +59,7 @@ const Auth = () => {
           "team_lead"
         );
         if (signUpError) {
+          setLocalError(signUpError.message);
           toast({
             title: "Signup failed",
             description: signUpError.message,
@@ -72,6 +77,7 @@ const Auth = () => {
         }
       }
     } catch (err: any) {
+      setLocalError(err.message);
       toast({
         title: "Error",
         description: err.message,
@@ -82,8 +88,7 @@ const Auth = () => {
     }
   };
 
-  const showConfirmation =
-    pendingConfirmation || error === "Email not confirmed";
+  const showConfirmation = pendingConfirmation;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -112,7 +117,16 @@ const Auth = () => {
                 Vi har sendt en bekræftelsesmail til <b>{email}</b>. Bekræft din
                 konto og log derefter ind.
               </p>
-              <Button onClick={() => setPendingConfirmation(false)}>
+              <Button
+                onClick={() => {
+                  setPendingConfirmation(false);
+                  setIsLogin(true);
+                  setEmail("");
+                  setPassword("");
+                  setName("");
+                  setLocalError(null); // ✅ nulstil fejl korrekt
+                }}
+              >
                 Tilbage til login
               </Button>
             </div>
